@@ -11,8 +11,10 @@
 
 #define COMM_PORT 8080
 
+bool remoteLatch = false;
 IPAddress remote;
 UDP connection;
+bool wifiConnected = false;
 
 FlightControl control;
 Battery battery;
@@ -33,14 +35,10 @@ void setup() {
     waitUntil(WiFi.ready);*/
     
     Serial.begin(9600);
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
     
     control = FlightControl(1200, 1140, 1600);
     control.init(TX, RX, D2, D3);
     battery = Battery(A3);
-    
-    connection.begin(COMM_PORT);
     
     timer.start();
     
@@ -48,49 +46,50 @@ void setup() {
 }
 
 void loop() {
-    // Data has been received
-    if (connection.parsePacket() > 0) {
-        if (!remote) {
-            Serial.println("Handshake data received");
-            
-            // Handshake time! Store the IP Address for later use
-            int event = connection.read();
-            if (event == '5') {
-                Serial.println("Handshake event confirmed");
-                remote = connection.remoteIP();
-                Serial.print("Remote IP Address: ");
-                Serial.println(remote);
+    if (WiFi.ready()) {
+        // Init UDP server every time WiFi comes online
+        if (!wifiConnected) {
+            connection.begin(COMM_PORT);
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
+            wifiConnected = true;
+        }
 
-                char buffer[] = {1, 2};
-                int sent = connection.sendPacket(buffer, sizeof(buffer), remote, COMM_PORT);
-                    
-                if (sent > 0) {
-                    Serial.println("Handshake reply sent");
-                } else {
-                    Serial.println("Error occured when sending handshake reply");
-                }
-                delay(500);
-            }
-        } else if (connection.remoteIP() == remote) {
-            //Serial.println("Normal data received");
+        // Data has been received
+        if (connection.parsePacket() > 0) {
             int event = connection.read();
-            processEvent(event);
+            if (!remoteLatch) {
+                // Handshake: latch the remote by storing it's IP address and
+                // checking future incoming packets against it
+                if (event == '5') {
+                    remote = connection.remoteIP();
+                    Serial.print("Remote IP Address: ");
+                    Serial.println(remote);
+                    remoteLatch = true;
+                }
+            }
+            if (remoteLatch && connection.remoteIP() == remote) {
+                //Serial.println("Normal data received");
+                processEvent(event);
+            }
+            
+            // Discard all remaining data in packet
+            while (connection.available()) {
+                connection.read();
+            }
         }
-        
-        // Discard all remaining data in packet
-        while(connection.available()) {
-            connection.read();
+
+        // Send telemetry data every 50 cycles after remote latch
+        if (remoteLatch) {
+            if (loopsSinceTele == 50) {
+                sendTelemetry();
+                loopsSinceTele = 0;
+            } else {
+                loopsSinceTele++;
+            }
         }
-    }
-    
-    // Send telemetry data every 50 cycles
-    if (remote) {
-        if (loopsSinceTele == 50) {
-            sendTelemetry();
-            loopsSinceTele = 0;
-        } else {
-            loopsSinceTele++;
-        }
+    } else {
+        wifiConnected = false;
     }
 }
 
@@ -124,9 +123,9 @@ void processEvent(int event) {
             control.endTakeoff();
             break;
         }
-        // Event 5 does exist, although it is not processed here
-        // This code is a placeholder for reference purposes only
         case '5': {
+            char buffer[] = {1, 2};
+            connection.sendPacket(buffer, sizeof(buffer), remote, COMM_PORT);
             break;
         }
     }
