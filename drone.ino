@@ -16,8 +16,8 @@ IPAddress remote;
 UDP connection;
 bool wifiConnected = false;
 
-FlightControl control;
-Battery battery;
+FlightControl control = FlightControl(1200, 1140, 1600);
+Battery battery = Battery(A3);
 
 int loopsSinceTele = 0;
 Timer timer(20, cycle);
@@ -35,10 +35,8 @@ void setup() {
     waitUntil(WiFi.ready);*/
     
     Serial.begin(9600);
-    
-    control = FlightControl(1200, 1140, 1600);
+
     control.init(TX, RX, D2, D3);
-    battery = Battery(A3);
     
     timer.start();
     
@@ -111,16 +109,6 @@ void processEvent(int event) {
         case '1': {
             Serial.println("Initiating Test Sequence");
             control.test();
-            break;
-        }
-        case '2': {
-            Serial.println("Beginning Takeoff");
-            control.takeoff();
-            break;
-        }
-        case '4': {
-            Serial.println("End Takeoff");
-            control.endTakeoff();
             break;
         }
         case '5': {

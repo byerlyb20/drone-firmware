@@ -1,10 +1,6 @@
 #include "flightcontrol.h"
 
-#define TESTING_IDLE_SPEED 1000
-#define TESTING_RUNNING_SPEED 1140
-#define TAKEOFF_IDLE_SPEED 1140
-
-FlightControl::FlightControl() {}
+#define ESC_PWM_FREQ 2000
 
 FlightControl::FlightControl(int idle, int min, int max) {
     this->idle = idle;
@@ -13,63 +9,33 @@ FlightControl::FlightControl(int idle, int min, int max) {
 }
 
 void FlightControl::init(int a, int b, int c, int d) {
-    frontLeft = ESC(a);
-    frontRight = ESC(b);
-    backLeft = ESC(c);
-    backRight = ESC(d);
-    frontLeft.arm();
-    frontRight.arm();
-    backLeft.arm();
-    backRight.arm();
+    frontLeft = a;
+    frontRight = b;
+    backLeft = c;
+    backRight = d;
+    pinMode(frontLeft, OUTPUT);
+    pinMode(frontRight, OUTPUT);
+    pinMode(backLeft, OUTPUT);
+    pinMode(backRight, OUTPUT);
 }
 
 void FlightControl::cycle() {
     if (testing) {
         if (loopCount == 0) {
-            frontLeft.setSpeed(TESTING_RUNNING_SPEED);
-            frontRight.setSpeed(TESTING_RUNNING_SPEED);
-            backLeft.setSpeed(TESTING_RUNNING_SPEED);
-            backRight.setSpeed(TESTING_RUNNING_SPEED);
-            
+            setMotorSpeeds(TESTING_RUNNING_SPEED, TESTING_RUNNING_SPEED, TESTING_RUNNING_SPEED, TESTING_RUNNING_SPEED);
         }
         if (loopCount == 500) {
-            frontLeft.setSpeed(TESTING_IDLE_SPEED);
-            frontRight.setSpeed(TESTING_IDLE_SPEED);
-            backLeft.setSpeed(TESTING_IDLE_SPEED);
-            backRight.setSpeed(TESTING_IDLE_SPEED);
+            setMotorSpeeds(TESTING_IDLE_SPEED, TESTING_IDLE_SPEED, TESTING_IDLE_SPEED, TESTING_IDLE_SPEED);
             loopCount = 0;
             testing = false;
         } else {
             loopCount++;
         }
-    } else if (takeoffing) {
-        // Only take positive values
-        float liftm = (lift > 0 ? lift : 0);
-        
-        int speed = liftm * (2000 - TAKEOFF_IDLE_SPEED) + TAKEOFF_IDLE_SPEED;
-        Serial.println("Speed: " + String(speed));
-        
-        frontLeft.setSpeed(speed);
-        frontRight.setSpeed(speed);
-        backLeft.setSpeed(speed);
-        backRight.setSpeed(speed);
-        if (speed >= 1300) {
-            takeoffing = false;
-            flying = true;
-        }
     } else if (flying) {
         parseMoveValues();
     } else {
-        frontLeft.setSpeed(1000);
-        frontRight.setSpeed(1000);
-        backLeft.setSpeed(1000);
-        backRight.setSpeed(1000);
+        setMotorSpeeds(0, 0, 0, 0);
     }
-    
-    frontLeft.cycle();
-    frontRight.cycle();
-    backLeft.cycle();
-    backRight.cycle();
 }
 
 void FlightControl::move(float l, float r, float p, float y) {
@@ -80,34 +46,27 @@ void FlightControl::move(float l, float r, float p, float y) {
 }
 
 void FlightControl::parseMoveValues() {
-    // Initialize boundaries for motor output
-    int upperEnd = max - idle;
-    int lowerEnd = idle - min;
-
+    // Input ranges:
+    // Lift: 0 ... 1
+    // Roll, Pitch, Yaw: -1 ... 1
+    
     // Scale and weight lift, roll, pitch, and yaw
-    float total = fabs(lift) + fabs(roll) + fabs(pitch) + fabs(yaw);
-    lift = fabs(lift) / total * lift;
-    roll = fabs(roll) / total * roll;
-    pitch = fabs(pitch) / total * pitch;
-    yaw = fabs(yaw) / total * yaw;
-
+    roll /= 2;
+    pitch /= 2;
+    yaw /= 4;
+    
     // Calculate motor outputs
-    float m1 = lift + roll - pitch + yaw;
-    float m2 = lift - roll - pitch - yaw;
-    float m3 = lift + roll + pitch - yaw;
-    float m4 = lift - roll + pitch + yaw;
-
-    // Scale motor outputs
-    m1 = m1 * (m1 > 0 ? upperEnd : lowerEnd) + idle;
-    m2 = m2 * (m2 > 0 ? upperEnd : lowerEnd) + idle;
-    m3 = m3 * (m3 > 0 ? upperEnd : lowerEnd) + idle;
-    m4 = m4 * (m4 > 0 ? upperEnd : lowerEnd) + idle;
+    float m[4];
+    m[0] = lift - pitch + yaw;
+    m[1] = lift - roll - yaw;
+    m[2] = lift + roll - yaw;
+    m[3] = lift + pitch + yaw;
+    for (int i = 0; i < 4; i++) {
+        m[i] = constrain(m[i], 0.0, 1.0);
+    }
     
     //Serial.println("Speed: " + String(m1));
-    frontLeft.setSpeed(m1);
-    frontRight.setSpeed(m2);
-    backLeft.setSpeed(m3);
-    backRight.setSpeed(m4);
+    setMotorSpeeds(m[0], m[1], m[2], m[3]);
 }
 
 void FlightControl::test() {
@@ -116,17 +75,17 @@ void FlightControl::test() {
     }
 }
 
-void FlightControl::takeoff() {
-    if (ready()) {
-        flying = true;
-    }
-}
-
-void FlightControl::endTakeoff() {
-    takeoffing = false;
-    flying = false;
-}
-
 bool FlightControl::ready() {
-    return !testing && !takeoffing && !flying;
+    return !testing && !flying;
+}
+
+void FlightControl::setMotorSpeeds(float a, float b, float c, float d) {
+    byte a_s = (byte) (a * 255);
+    byte b_s = (byte) (b * 255);
+    byte c_s = (byte) (c * 255);
+    byte d_s = (byte) (d * 255);
+    analogWrite(frontLeft, a_s, ESC_PWM_FREQ);
+    analogWrite(frontRight, b_s, ESC_PWM_FREQ);
+    analogWrite(backLeft, c_s, ESC_PWM_FREQ);
+    analogWrite(backRight, d_s, ESC_PWM_FREQ);
 }
